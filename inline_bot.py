@@ -89,12 +89,12 @@ def get_app_root():
     app_root = os.path.dirname(basis)
     return app_root
 
-def get_config_dict(args):
+def get_config_dict(args=None):
     app_root = get_app_root()
     config_filepath = os.path.join(app_root, CONST_MAXBOT_CONFIG_FILE)
 
     # allow assign config by command line.
-    if not args.input is None:
+    if args is not None and not args.input is None:
         if len(args.input) > 0:
             config_filepath = args.input
 
@@ -354,92 +354,83 @@ def get_uc_options(uc, config_dict, webdriver_path):
 def load_chromdriver_uc(config_dict):
     import undetected_chromedriver as uc
 
-    show_debug_message = True       # debug.
-    show_debug_message = False      # online
-
-    if config_dict["advanced"]["verbose"]:
-        show_debug_message = True
-
     Root_Dir = get_app_root()
     webdriver_path = os.path.join(Root_Dir, "webdriver")
+    adblock_plus_enable = config_dict["advanced"]["adblock_plus_enable"]
+    
+    return load_chromdriver_uc_impl(webdriver_path, adblock_plus_enable)
+
+def load_chromdriver_uc_impl(webdriver_path, adblock_plus_enable):
+    import undetected_chromedriver as uc
+
     chromedriver_path = get_chromedriver_path(webdriver_path)
 
-    if not os.path.exists(webdriver_path):
-        os.mkdir(webdriver_path)
+    options = uc.ChromeOptions()
+    options.page_load_strategy="eager"
 
-    if not os.path.exists(chromedriver_path):
-        print("ChromeDriver not exist, try to download to:", webdriver_path)
-        chromedriver_autoinstaller.install(path=webdriver_path, make_version_dir=False)
-    else:
-        print("ChromeDriver exist:", chromedriver_path)
+    # Add option to prevent opening a new window when the first one is closed
+    options.add_argument("--restore-last-session")
+    # Don't use detach option as it's not supported
+    # options.add_experimental_option("detach", False)
 
+    if adblock_plus_enable:
+        load_extension_path = ""
+        extension_list = get_favoriate_extension_path(webdriver_path)
+        for ext in extension_list:
+            ext = ext.replace('.crx','')
+            if os.path.exists(ext):
+                load_extension_path += ("," + os.path.abspath(ext))
+        if len(load_extension_path) > 0:
+            print('load-extension:', load_extension_path[1:])
+            options.add_argument('--load-extension=' + load_extension_path[1:])
+
+    options.add_argument('--disable-features=TranslateUI')
+    options.add_argument('--disable-translate')
+    options.add_argument('--lang=zh-TW')
+    options.add_argument('--disable-web-security')
+    options.add_argument("--no-sandbox")
+
+    options.add_argument("--password-store=basic")
+    options.add_experimental_option("prefs", {
+        "credentials_enable_service": False, 
+        "profile.password_manager_enabled": False, 
+        "translate": {"enabled": False}
+    })
+
+    caps = options.to_capabilities()
+    caps["unhandledPromptBehavior"] = u"accept"
 
     driver = None
     if os.path.exists(chromedriver_path):
-        # use chromedriver_autodownload instead of uc auto download.
-        is_cache_exist = clean_uc_exe_cache()
-
+        print("Use user driver path:", chromedriver_path)
+        is_local_chrome_browser_lower = False
         try:
-            options = get_uc_options(uc, config_dict, webdriver_path)
-            driver = uc.Chrome(driver_executable_path=chromedriver_path, options=options, headless=config_dict["advanced"]["headless"])
+            driver = uc.Chrome(executable_path=chromedriver_path, options=options, desired_capabilities=caps, suppress_welcome=False)
         except Exception as exc:
+            if "cannot connect to chrome" in str(exc):
+                if "This version of ChromeDriver only supports Chrome version" in str(exc):
+                    is_local_chrome_browser_lower = True
             print(exc)
-            error_message = str(exc)
-            left_part = None
-            if "Stacktrace:" in error_message:
-                left_part = error_message.split("Stacktrace:")[0]
-                print(left_part)
-
-            if "This version of ChromeDriver only supports Chrome version" in error_message:
-                print(CONST_CHROME_VERSION_NOT_MATCH_EN)
-                print(CONST_CHROME_VERSION_NOT_MATCH_TW)
-
-            # remove exist chromedriver, download again.
-            try:
-                print("Deleting exist and download ChromeDriver again.")
-                os.unlink(chromedriver_path)
-            except Exception as exc2:
-                print(exc2)
-                pass
-
-            chromedriver_autoinstaller.install(path=webdriver_path, make_version_dir=False)
-            try:
-                options = get_uc_options(uc, config_dict, webdriver_path)
-                driver = uc.Chrome(driver_executable_path=chromedriver_path, options=options, headless=config_dict["advanced"]["headless"])
-            except Exception as exc2:
-                print(exc2)
-                pass
-    else:
-        print("WebDriver not found at path:", chromedriver_path)
-
-    if driver is None:
-        print('WebDriver object is None..., try again..')
-        try:
-            driver = uc.Chrome(options=options, headless=config_dict["advanced"]["headless"])
-        except Exception as exc:
-            print(exc)
-            error_message = str(exc)
-            left_part = None
-            if "Stacktrace:" in error_message:
-                left_part = error_message.split("Stacktrace:")[0]
-                print(left_part)
-
-            if "This version of ChromeDriver only supports Chrome version" in error_message:
-                print(CONST_CHROME_VERSION_NOT_MATCH_EN)
-                print(CONST_CHROME_VERSION_NOT_MATCH_TW)
             pass
 
-    if driver is None:
-        print("create web drive object by undetected_chromedriver fail!")
-
-        if os.path.exists(chromedriver_path):
-            print("Unable to use undetected_chromedriver, ")
-            print("try to use local chromedriver to launch chrome browser.")
+        if is_local_chrome_browser_lower:
+            print("Use local user downloaded chromedriver to lunch chrome browser.")
             driver_type = "selenium"
             driver = load_chromdriver_normal(config_dict, driver_type)
-        else:
-            print("建議您自行下載 ChromeDriver 到 webdriver 的資料夾下")
-            print("you need manually download ChromeDriver to webdriver folder.")
+    else:
+        print("Oops! web driver not on path:", chromedriver_path)
+        print('let uc automatically download chromedriver.')
+        driver = uc.Chrome(options=options, desired_capabilities=caps, suppress_welcome=False)
+
+    if driver is None:
+        print("create web drive object fail!")
+    else:
+        download_dir_path="."
+        params = {
+            "behavior": "allow",
+            "downloadPath": os.path.realpath(download_dir_path)
+        }
+        driver.execute_cdp_cmd("Page.setDownloadBehavior", params)
 
     return driver
 
@@ -465,6 +456,7 @@ def get_driver_by_config(config_dict):
         # output config:
         print("maxbot app version", CONST_APP_VERSION)
         print("python version", platform.python_version())
+        print("platform", platform.platform())
         print("config", config_dict)
 
         homepage = config_dict["homepage"]
@@ -496,6 +488,9 @@ def get_driver_by_config(config_dict):
     webdriver_path = os.path.join(Root_Dir, "webdriver")
     print("platform.system().lower():", platform.system().lower())
 
+    adblock_plus_enable = config_dict["advanced"]["adblock_plus_enable"]
+    print("adblock_plus_enable:", adblock_plus_enable)
+
     if config_dict["browser"] in ["chrome","brave"]:
         # method 6: Selenium Stealth
         if config_dict["webdriver_type"] != CONST_WEBDRIVER_TYPE_UC:
@@ -507,7 +502,7 @@ def get_driver_by_config(config_dict):
                 if hasattr(sys, 'frozen'):
                     from multiprocessing import freeze_support
                     freeze_support()
-            driver = load_chromdriver_uc(config_dict)
+            driver = load_chromdriver_uc_impl(webdriver_path, adblock_plus_enable)
 
     if config_dict["browser"] == "firefox":
         # default os is linux/mac
@@ -1212,38 +1207,17 @@ def get_current_url(driver):
 
     try:
         url = driver.current_url
+        
     except NoSuchWindowException:
         print('NoSuchWindowException at this url:', url )
-        #print("last_url:", last_url)
-        #print("get_log:", driver.get_log('driver'))
-        window_handles_count = 0
+        # When we get NoSuchWindowException, it means the window was closed
+        # Set is_quit_bot to True immediately to exit the program
+        is_quit_bot = True
         try:
-            window_handles_count = len(driver.window_handles)
-            #print("window_handles_count:", window_handles_count)
-            if window_handles_count >= 1:
-                driver.switch_to.window(driver.window_handles[0])
-                driver.switch_to.default_content()
-                time.sleep(0.2)
-        except Exception as excSwithFail:
-            #print("excSwithFail:", excSwithFail)
+            driver.quit()
+        except:
             pass
-        if window_handles_count==0:
-            try:
-                driver_log = driver.get_log('driver')[-1]['message']
-                print("get_log:", driver_log)
-                if DISCONNECTED_MSG in driver_log:
-                    print('quit bot by NoSuchWindowException')
-                    is_quit_bot = True
-                    driver.quit()
-                    sys.exit()
-            except Exception as excGetDriverMessageFail:
-                #print("excGetDriverMessageFail:", excGetDriverMessageFail)
-                except_string = str(excGetDriverMessageFail)
-                if 'HTTP method not allowed' in except_string:
-                    print('quit bot by close browser')
-                    is_quit_bot = True
-                    driver.quit()
-                    sys.exit()
+        return url, is_quit_bot
 
     except UnexpectedAlertPresentException as exc1:
         print('UnexpectedAlertPresentException at this url:', url )
@@ -1290,7 +1264,6 @@ def get_current_url(driver):
                     print('quit bot by error:', each_error_string)
                     is_quit_bot = True
                     driver.quit()
-                    sys.exit()
 
         # not is above case, print exception.
         print("Exception:", str_exc)
@@ -1471,6 +1444,10 @@ def inline_change_lang(driver, url):
     show_debug_message = True    # debug.
     show_debug_message = False   # online
 
+    # Skip language change if already using zh-hk or zh-tw
+    if "?language=zh-hk" in url or "?language=zh-tw" in url:
+        return
+        
     el_current_lang = None
     try:
         my_css_selector = "div.current"
@@ -1505,65 +1482,75 @@ def main(args):
     url = ""
     last_url = ""
 
-    while True:
-        time.sleep(0.05)
+    try:
+        while True:
+            time.sleep(0.05)
 
-        # pass if driver not loaded.
-        if driver is None:
-            print("web driver not accessible!")
-            break
+            # pass if driver not loaded.
+            if driver is None:
+                print("web driver not accessible!")
+                break
 
-        url, is_quit_bot = get_current_url(driver)
-        if is_quit_bot:
-            break
+            try:
+                url, is_quit_bot = get_current_url(driver)
+                if is_quit_bot:
+                    print("Exiting bot due to window closed")
+                    break
+            except Exception as e:
+                print(f"Error getting current URL: {e}")
+                break
 
-        if url is None:
-            continue
-        else:
-            if len(url) == 0:
+            if url is None:
+                continue
+            else:
+                if len(url) == 0:
+                    continue
+
+            is_maxbot_paused = False
+            if os.path.exists(CONST_MAXBOT_INT28_FILE):
+                is_maxbot_paused = True
+
+            if len(url) > 0:
+                if url != last_url:
+                    print(url)
+                    write_last_url_to_file(url)
+                    if is_maxbot_paused:
+                        print("MAXBOT Paused.")
+                last_url = url
+
+            if is_maxbot_paused:
+                time.sleep(0.2)
                 continue
 
-        is_maxbot_paused = False
-        if os.path.exists(CONST_MAXBOT_INT28_FILE):
-            is_maxbot_paused = True
+            target_domain_list = ['//inline.app/booking/']
+            for each_domain in target_domain_list:
+                if each_domain in url:
+                    #inline_change_lang(driver, url)
+                    current_progress_array = url.split('/')
+                    current_progress_length = len(current_progress_array)
+                    if current_progress_length >= 6:
+                        branch_field = current_progress_array[5]
+                        if len(branch_field) >= 0:
+                            is_form_mode = False
+                            if current_progress_length >= 7:
+                                if current_progress_array[6] == 'form':
+                                    is_form_mode = True
 
-        if len(url) > 0 :
-            if url != last_url:
-                print(url)
-                write_last_url_to_file(url)
-                if is_maxbot_paused:
-                    print("MAXBOT Paused.")
-            last_url = url
-
-        if is_maxbot_paused:
-            time.sleep(0.2)
-            continue
-
-        if len(url) > 0 :
-            if url != last_url:
-                print(url)
-            last_url = url
-
-        target_domain_list = ['//inline.app/booking/']
-        for each_domain in target_domain_list:
-            if each_domain in url:
-                inline_change_lang(driver, url)
-                current_progress_array = url.split('/')
-                current_progress_length = len(current_progress_array)
-                if current_progress_length >= 6:
-                    branch_field = current_progress_array[5]
-                    if len(branch_field) >= 0:
-                        is_form_mode = False
-                        if current_progress_length >= 7:
-                            if current_progress_array[6] == 'form':
-                                is_form_mode = True
-
-                        if is_form_mode:
-                            # fill personal info.
-                            ret = fill_personal_info(driver, config_dict)
-                        else:
-                            # select date.
-                            ret = inline_reg(driver, config_dict)
+                            if is_form_mode:
+                                # fill personal info.
+                                ret = fill_personal_info(driver, config_dict)
+                            else:
+                                # select date.
+                                ret = inline_reg(driver, config_dict)
+    except KeyboardInterrupt:
+        print("Program interrupted by user")
+    finally:
+        # Make sure to quit the driver when exiting
+        if driver:
+            try:
+                driver.quit()
+            except:
+                pass
 
 
 def cli():
