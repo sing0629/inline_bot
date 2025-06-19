@@ -6,6 +6,8 @@ source venv/bin/activate
 pip3 install -r pip-reg.txt
 python3 settings.py
 python3 chrome_tixcraft.py
+deactivate
+pip install seleniumbase
 
 # Run
 

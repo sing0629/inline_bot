@@ -1,0 +1,19 @@
+SingBot.py:76:SB
+--------------------------------------------------------------------
+Last Page: [WARNING! Browser Not Open!]
+ Duration: 25.44s
+  Browser: Chrome 137.0.7151.120
+   Driver: chromedriver 137.0.7151.119
+Timestamp: 1750323422  (Unix Timestamp)
+     Date: Thursday, 19 June 2025
+     Time: 4:57:02 PM  (HKT, UTC+08:00)
+--------------------------------------------------------------------
+Traceback:
+  Traceback (most recent call last):
+  File "/Users/sing/Documents/Github/inline_bot_v2/SingBot.py", line 13, in main
+    current_url = sb.get_current_url()
+                  ^^^^^^^^^^^^^^^^^^^^
+  File "/Users/sing/Documents/Github/inline_bot_v2/venv/lib/python3.12/site-packages/seleniumbase/fixtures/base_case.py", line 1281, in get_current_url
+    if "%" in current_url:
+       ^^^^^^^^^^^^^^^^^^
+TypeError: argument of type 'NoneType' is not iterable
